@@ -18,10 +18,12 @@ pub struct ChannelConfig {
     pub oz_config: OzConfig,
     /// Configuration for telemetry sending, or [`None`] if telemetry should be
     /// disabled for this build.
+    /// 已注释：禁用遥测收集
     pub telemetry_config: Option<TelemetryConfig>,
     /// Configuration for autoupdate functionality.
     pub autoupdate_config: Option<AutoupdateConfig>,
     /// Configuration for crash reporting.
+    /// 已注释：禁用崩溃报告
     pub crash_reporting_config: Option<CrashReportingConfig>,
     /// Configuration for statically-bundled MCP OAuth credentials.
     pub mcp_static_config: Option<McpStaticConfig>,
@@ -46,7 +48,9 @@ impl WarpServerConfig {
             server_root_url: "https://app.warp.dev".into(),
             rtc_server_url: "wss://rtc.app.warp.dev/graphql/v2".into(),
             session_sharing_server_url: Some("wss://sessions.app.warp.dev".into()),
-            firebase_auth_api_key: "AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs".into(),
+            // 已注释：硬编码的 Firebase API Key
+            // firebase_auth_api_key: "AIzaSyBdy3O3S9hrdayLJxJ7mriBR4qgUaUygAs".into(),
+            firebase_auth_api_key: "".into(),
         }
     }
 }

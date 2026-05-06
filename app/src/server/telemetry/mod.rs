@@ -91,26 +91,29 @@ impl TelemetryApi {
     // Batches up telemetry events from the global queue and sends a Message to the Rudderstack API.
     // Returns the number of events that were flushed.
     pub async fn flush_events(&self, settings_snapshot: PrivacySettingsSnapshot) -> Result<usize> {
-        let events = warpui::telemetry::flush_events();
-        let event_count = events.len();
+        // 已注释：禁用遥测发送
+        // let events = warpui::telemetry::flush_events();
+        // let event_count = events.len();
 
-        #[cfg(not(target_family = "wasm"))]
-        if FeatureFlag::SendTelemetryToFile.is_enabled() {
-            self.persist_events_to_telemetry_log_file(events.clone())?;
-        }
+        // #[cfg(not(target_family = "wasm"))]
+        // if FeatureFlag::SendTelemetryToFile.is_enabled() {
+        //     self.persist_events_to_telemetry_log_file(events.clone())?;
+        // }
 
-        if ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled() {
-            self.send_batch_messages_to_rudder(
-                events
-                    .into_iter()
-                    .map(Event::to_rudder_batch_message)
-                    .collect(),
-                settings_snapshot,
-            )
-            .await?;
-        }
+        // if ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled() {
+        //     self.send_batch_messages_to_rudder(
+        //         events
+        //             .into_iter()
+        //             .map(Event::to_rudder_batch_message)
+        //             .collect(),
+        //         settings_snapshot,
+        //     )
+        //     .await?;
+        // }
 
-        Ok(event_count)
+        // Ok(event_count)
+        log::info!("Telemetry sending disabled");
+        Ok(0)
     }
 
     /// Flushes events directly to Rudder that were previously written into a file at `path`
@@ -217,17 +220,20 @@ impl TelemetryApi {
         event: impl warp_core::telemetry::TelemetryEvent,
         settings_snapshot: PrivacySettingsSnapshot,
     ) -> Result<()> {
-        let event = warpui::telemetry::create_event(
-            user_id.map(|uid| uid.as_string()),
-            anonymous_id,
-            event.name().into(),
-            event.payload(),
-            event.contains_ugc(),
-            warpui::time::get_current_time(),
-        );
+        // 已注释：禁用遥测发送
+        // let event = warpui::telemetry::create_event(
+        //     user_id.map(|uid| uid.as_string()),
+        //     anonymous_id,
+        //     event.name().into(),
+        //     event.payload(),
+        //     event.contains_ugc(),
+        //     warpui::time::get_current_time(),
+        // );
 
-        self.send_telemetry_event_internal(event, settings_snapshot)
-            .await
+        // self.send_telemetry_event_internal(event, settings_snapshot)
+        //     .await
+        log::info!("Telemetry event sending disabled");
+        Ok(())
     }
 
     /// Internal implementation for sending telemetry events. This reduces code size, since
@@ -304,74 +310,71 @@ impl TelemetryApi {
         messages: Vec<RudderBatchMessageWithMetadata>,
         settings_snapshot: PrivacySettingsSnapshot,
     ) -> Result<()> {
-        if messages.is_empty() {
-            log::debug!("Dropping empty RudderStack telemetry batch");
-            return Ok(());
-        }
+        // 已注释：禁用遥测发送
+        // if messages.is_empty() {
+        //     log::debug!("Dropping empty RudderStack telemetry batch");
+        //     return Ok(());
+        // }
 
-        if settings_snapshot.should_disable_telemetry() {
-            log::info!("Not sending batched messages because telemetry is disabled.");
-            return Ok(());
-        }
+        // if settings_snapshot.should_disable_telemetry() {
+        //     log::info!("Not sending batched messages because telemetry is disabled.");
+        //     return Ok(());
+        // }
 
-        log::info!("Start to send telemetry events to RudderStack");
+        // log::info!("Start to send telemetry events to RudderStack");
 
-        let (mut messages_with_ugc, messages_without_ugc): (Vec<_>, Vec<_>) = messages
-            .into_iter()
-            .partition(|message| message.contains_ugc);
+        // let (mut messages_with_ugc, messages_without_ugc): (Vec<_>, Vec<_>) = messages
+        //     .into_iter()
+        //     .partition(|message| message.contains_ugc);
 
-        // If we shouldn't collect UGC telemetry, forcibly clear any messages with UGC before trying to send.
-        if !settings_snapshot.should_collect_ai_ugc_telemetry() {
-            messages_with_ugc.clear();
-        }
+        // // If we shouldn't collect UGC telemetry, forcibly clear any messages with UGC before trying to send.
+        // if !settings_snapshot.should_collect_ai_ugc_telemetry() {
+        //     messages_with_ugc.clear();
+        // }
 
-        for (messages, rudder_stack_destination) in [
-            (
-                messages_with_ugc,
-                ChannelState::rudderstack_ugc_destination(),
-            ),
-            (
-                messages_without_ugc,
-                ChannelState::rudderstack_non_ugc_destination(),
-            ),
-        ] {
-            if messages.is_empty() {
-                continue;
-            }
+        // for (messages, rudder_stack_destination) in [
+        //     (
+        //         messages_with_ugc,
+        //         ChannelState::rudderstack_ugc_destination(),
+        //     ),
+        //     (
+        //         messages_without_ugc,
+        //         ChannelState::rudderstack_non_ugc_destination(),
+        //     ),
+        // ] {
+        //     if messages.is_empty() {
+        //         continue;
+        //     }
 
-            // Note that timestamp and context are already included in the individual RudderBatchMessages
-            // and these are the most important ones,
-            // but we also add them to the RudderMessage::Batch wrapper.
-            let rudder_message = RudderMessage::Batch(RudderBatch {
-                batch: messages
-                    .into_iter()
-                    .map(|message| message.message)
-                    .collect(),
-                original_timestamp: Some(Utc::now()),
-                ..Default::default()
-            });
-            if let Err(e) = self
-                .send_rudder_request(rudder_message, rudder_stack_destination)
-                .await
-            {
-                // Don't treat a connection issue as an error as these are outside of our control.
-                //
-                // This is only conditionally compiled because `is_connect` is not
-                // available on wasm.  If additional checks are made against the
-                // `reqwest::Error`, this condition should be performed specifically
-                // against `is_connect` and not the whole loop.
-                #[cfg(not(target_family = "wasm"))]
-                for cause in e.chain() {
-                    if let Some(err) = cause.downcast_ref::<reqwest::Error>() {
-                        if err.is_connect() {
-                            log::warn!("Failed to send event to RudderStack: {e}");
-                            return Ok(());
-                        }
-                    }
-                }
-                return Err(e);
-            }
-        }
+        //     let batch = RudderBatch {
+        //         batch: messages.into_iter().map(|message| message.message).collect(),
+        //         sent_at: warpui::time::get_current_time(),
+        //     };
+
+        //     let response = self
+        //         .client
+        //         .post_json(
+        //             format!(
+        //                 "{}/v1/batch",
+        //                 rudder_stack_destination.root_url
+        //             ),
+        //             &batch,
+        //         )
+        //         .await;
+
+        //     match response {
+        //         Ok(_) => {
+        //             log::info!("Successfully sent telemetry events to RudderStack");
+        //         }
+        //         Err(error) => {
+        //             log::error!("Failed to send telemetry events to RudderStack: {error}");
+        //             return Err(error.into());
+        //         }
+        //     }
+        // }
+
+        // Ok(())
+        log::info!("Telemetry batch sending disabled");
         Ok(())
     }
 

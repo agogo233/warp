@@ -1,0 +1,72 @@
+name: Build Windows Portable
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: Release channel to build
+        type: choice
+        options:
+          - stable
+          - preview
+          - dev
+          - oss
+        default: stable
+
+jobs:
+  build-windows-portable:
+    name: Build Windows Portable (x64)
+    runs-on: windows-latest-large
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: ./.github/actions/prepare_environment
+        with:
+          target_os: windows
+          is_self_hosted: false
+          install_release_deps: true
+
+      - name: Build binary and prepare resources
+        id: build
+        run: script/bundle -Channel ${{ inputs.channel }} -SkipBuildInstaller -arch x64
+        shell: bash
+        env:
+          CHANNEL: ${{ inputs.channel }}
+
+      - name: Prepare portable package
+        id: package
+        shell: pwsh
+        run: |
+          $BinaryPath = "${{ steps.build.outputs.binary_path }}"
+          $BinaryName = Split-Path $BinaryPath -Leaf
+          $ProfileDir = "${{ steps.build.outputs.target_profile_dir }}"
+
+          # Create portable directory
+          $PortableDir = Join-Path $env:RUNNER_TEMP 'warp-portable'
+          if (Test-Path $PortableDir) { Remove-Item $PortableDir -Recurse -Force }
+          New-Item -ItemType Directory -Path $PortableDir -Force | Out-Null
+
+          # Copy binary
+          Copy-Item -Path $BinaryPath -Destination $PortableDir -Force
+
+          # Copy resources directory
+          $ResourcesSrc = Join-Path $ProfileDir 'resources'
+          $ResourcesDst = Join-Path $PortableDir 'resources'
+          if (Test-Path $ResourcesSrc) {
+            Copy-Item -Path $ResourcesSrc -Destination $ResourcesDst -Recurse -Force
+          }
+
+          # Create zip
+          $ZipPath = "warp-${{ inputs.channel }}-windows-x64.zip"
+          Compress-Archive -Path $PortableDir -DestinationPath $ZipPath -Force
+
+          Write-Output "portable_zip=$ZipPath" >> $env:GITHUB_OUTPUT
+          Write-Output "portable_dir=$PortableDir" >> $env:GITHUB_OUTPUT
+
+      - name: Upload portable as artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: warp-${{ inputs.channel }}-windows-x64-portable
+          path: ${{ steps.package.outputs.portable_zip }}
+          retention-days: 5

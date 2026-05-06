@@ -45,39 +45,43 @@ impl TelemetryCollector {
     }
 
     pub fn initialize_telemetry_collection(&self, ctx: &mut ModelContext<TelemetryCollector>) {
-        // Start a background thread to periodically flush events from the telemetry event queue.
-        if ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled() {
-            // Flush the events to Rudderstack that were persisted into a file the last time the app was
-            // quit.
-            self.flush_persisted_events_from_disk(ctx);
-        }
+        // 已注释：禁用遥测收集
+        log::info!("Telemetry collection disabled");
+        return;
 
-        // Send Active App Usage signals
-        if FeatureFlag::RecordAppActiveEvents.is_enabled()
-            && (ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled())
-        {
-            self.schedule_send_active_usage_event(ctx);
-        }
+        // // Start a background thread to periodically flush events from the telemetry event queue.
+        // if ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled() {
+        //     // Flush the events to Rudderstack that were persisted into a file the last time the app was
+        //     // quit.
+        //     self.flush_persisted_events_from_disk(ctx);
+        // }
 
-        // Start a background thread to periodically flush events from the telemetry event queue.
-        if ChannelState::is_release_bundle()
-            || FeatureFlag::WithSandboxTelemetry.is_enabled()
-            || FeatureFlag::SendTelemetryToFile.is_enabled()
-        {
-            self.schedule_event_queue_flush(ctx);
-        }
+        // // Send Active App Usage signals
+        // if FeatureFlag::RecordAppActiveEvents.is_enabled()
+        //     && (ChannelState::is_release_bundle() || FeatureFlag::WithSandboxTelemetry.is_enabled())
+        // {
+        //     self.schedule_send_active_usage_event(ctx);
+        // }
 
-        // Clear queued telemetry events when telemetry is enabled or disabled. If telemetry is
-        // enabled, we will start sending Rudderstack requests when the event queue is periodically
-        // flushed. The initial request should not contain any events recorded when the user was
-        // previously opted-out of telemetry. In the case where the user turns the telemetry from
-        // on to off, we should not send another request with any telemetry, even if the event was
-        // initially recorded prior to the user turning telemetry off.`
-        ctx.subscribe_to_model(&PrivacySettings::handle(ctx), |_me, event, _ctx| {
-            if let PrivacySettingsChangedEvent::UpdateIsTelemetryEnabled { .. } = event {
-                clear_event_queue();
-            }
-        });
+        // // Start a background thread to periodically flush events from the telemetry event queue.
+        // if ChannelState::is_release_bundle()
+        //     || FeatureFlag::WithSandboxTelemetry.is_enabled()
+        //     || FeatureFlag::SendTelemetryToFile.is_enabled()
+        // {
+        //     self.schedule_event_queue_flush(ctx);
+        // }
+
+        // // Clear queued telemetry events when telemetry is enabled or disabled. If telemetry is
+        // // enabled, we will start sending Rudderstack requests when the event queue is periodically
+        // // flushed. The initial request should not contain any events recorded when the user was
+        // // previously opted-out of telemetry. In the case where the user turns the telemetry from
+        // // on to off, we should not send another request with any telemetry, even if the event was
+        // // initially recorded prior to the user turning telemetry off.`
+        // ctx.subscribe_to_model(&PrivacySettings::handle(ctx), |_me, event, _ctx| {
+        //     if let PrivacySettingsChangedEvent::UpdateIsTelemetryEnabled { .. } = event {
+        //         clear_event_queue();
+        //     }
+        // });
     }
 
     /// Writes all queued but unsent telemetry telemetry events to disk so that they may be sent

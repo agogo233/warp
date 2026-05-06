@@ -181,68 +181,72 @@ impl ToSentryTags for CrashRecoveryMetadata {
 /// Initializes the crash reporting subsystem.  Returns whether or not crash
 /// reporting is active.
 pub(crate) fn init(ctx: &mut AppContext) -> bool {
-    if !FeatureFlag::CrashReporting.is_enabled() {
-        log::info!("Crash reporting FeatureFlag is disabled; not initializing sentry.");
-        return false;
-    }
+    // 已注释：禁用崩溃报告
+    log::info!("Crash reporting disabled; not initializing sentry.");
+    return false;
 
-    let window_manager = WindowManager::handle(ctx);
-    ctx.subscribe_to_model(&window_manager, |_, event, _| match event {
-        StateEvent::ValueChanged { current, previous } => {
-            if current.stage != previous.stage {
-                set_lifecycle_stage(current.stage);
-            }
-        }
-    });
+    // if !FeatureFlag::CrashReporting.is_enabled() {
+    //     log::info!("Crash reporting FeatureFlag is disabled; not initializing sentry.");
+    //     return false;
+    // }
 
-    let antivirus_info = AntivirusInfo::handle(ctx);
-    ctx.subscribe_to_model(&antivirus_info, |antivirus_info, event, ctx| match event {
-        AntivirusInfoEvent::ScannedComplete => {
-            let antivirus_info = antivirus_info.as_ref(ctx);
-            set_antivirus_info(antivirus_info);
-        }
-    });
+    // let window_manager = WindowManager::handle(ctx);
+    // ctx.subscribe_to_model(&window_manager, |_, event, _| match event {
+    //     StateEvent::ValueChanged { current, previous } => {
+    //         if current.stage != previous.stage {
+    //             set_lifecycle_stage(current.stage);
+    //         }
+    //     }
+    // });
 
-    let is_crash_reporting_enabled = is_crash_reporting_enabled(ctx);
+    // let antivirus_info = AntivirusInfo::handle(ctx);
+    // ctx.subscribe_to_model(&antivirus_info, |antivirus_info, event, ctx| match event {
+    //     AntivirusInfoEvent::ScannedComplete => {
+    //         let antivirus_info = antivirus_info.as_ref(ctx);
+    //         set_antivirus_info(antivirus_info);
+    //     }
+    // });
 
-    if is_crash_reporting_enabled {
-        AuthStateProvider::handle(ctx).update(ctx, |auth_state_provider, ctx| {
-            init_sentry(
-                auth_state_provider.get().user_id(),
-                auth_state_provider.get().user_email(),
-                ctx,
-            );
-        });
-    } else {
-        log::info!("Crash reporting setting is disabled; not initializing sentry.");
-    }
+    // let is_crash_reporting_enabled = is_crash_reporting_enabled(ctx);
 
-    set_windowing_system(ctx.windows().windowing_system());
+    // if is_crash_reporting_enabled {
+    //     AuthStateProvider::handle(ctx).update(ctx, |auth_state_provider, ctx| {
+    //         init_sentry(
+    //             auth_state_provider.get().user_id(),
+    //             auth_state_provider.get().user_email(),
+    //             ctx,
+    //         );
+    //     });
+    // } else {
+    //     log::info!("Crash reporting setting is disabled; not initializing sentry.");
+    // }
 
-    let privacy_settings = PrivacySettings::handle(ctx);
-    ctx.subscribe_to_model(&privacy_settings, |_, event, ctx| {
-        if let &PrivacySettingsChangedEvent::UpdateIsCrashReportingEnabled { new_value, .. } = event
-        {
-            if new_value {
-                AuthStateProvider::handle(ctx).update(ctx, |auth_state_provider, ctx| {
-                    init_sentry(
-                        auth_state_provider.get().user_id(),
-                        auth_state_provider.get().user_email(),
-                        ctx,
-                    );
-                });
-            } else {
-                uninit_sentry();
-            }
-        }
-    });
+    // set_windowing_system(ctx.windows().windowing_system());
 
-    // Having initialized the SDK above, we can now set the initial value of
-    // some tags.
-    set_lifecycle_stage(window_manager.as_ref(ctx).stage());
-    init_virtual_environment_tag(ctx);
+    // let privacy_settings = PrivacySettings::handle(ctx);
+    // ctx.subscribe_to_model(&privacy_settings, |_, event, ctx| {
+    //     if let &PrivacySettingsChangedEvent::UpdateIsCrashReportingEnabled { new_value, .. } = event
+    //     {
+    //         if new_value {
+    //             AuthStateProvider::handle(ctx).update(ctx, |auth_state_provider, ctx| {
+    //                 init_sentry(
+    //                     auth_state_provider.get().user_id(),
+    //                     auth_state_provider.get().user_email(),
+    //                     ctx,
+    //                 );
+    //             });
+    //         } else {
+    //             uninit_sentry();
+    //         }
+    //     }
+    // });
 
-    is_crash_reporting_enabled
+    // // Having initialized the SDK above, we can now set the initial value of
+    // // some tags.
+    // set_lifecycle_stage(window_manager.as_ref(ctx).stage());
+    // init_virtual_environment_tag(ctx);
+
+    // is_crash_reporting_enabled
 }
 
 #[derive(Default)]
@@ -294,105 +298,110 @@ fn get_environment() -> Cow<'static, str> {
 /// This must be called from the main thread to capture panics/crashes across the entire
 /// application.
 fn init_sentry(user_id: Option<UserUid>, email: Option<String>, ctx: &mut AppContext) {
-    let key = release_version();
+    // 已注释：禁用 Sentry 初始化
+    log::info!("Sentry initialization disabled");
+    return;
 
-    let environment = Some(get_environment());
+    // let key = release_version();
 
-    log::info!("Initializing crash reporting {environment:?} with tag {key:?}...");
+    // let environment = Some(get_environment());
 
-    fn before_breadcrumb(crumb: sentry::Breadcrumb) -> Option<sentry::Breadcrumb> {
-        #[cfg(linux_or_windows)]
-        sentry_minidump::forward_breadcrumb(crumb.clone());
-        #[cfg(all(target_os = "macos", feature = "cocoa_sentry"))]
-        mac::forward_breadcrumb(&crumb);
+    // log::info!("Initializing crash reporting {environment:?} with tag {key:?}...");
 
-        Some(crumb)
-    }
+    // fn before_breadcrumb(crumb: sentry::Breadcrumb) -> Option<sentry::Breadcrumb> {
+    //     #[cfg(linux_or_windows)]
+    //     sentry_minidump::forward_breadcrumb(crumb.clone());
+    //     #[cfg(all(target_os = "macos", feature = "cocoa_sentry"))]
+    //     mac::forward_breadcrumb(&crumb);
 
-    /// We scrub text we send to Sentry so that we don't leak user input into
-    /// crash reports.
-    fn scrub_message(message: &mut String) {
-        for (regex, replacement) in ERROR_MESSAGES_TO_SCRUB.iter() {
-            if regex.is_match(message) {
-                *message = format!("(REDACTED) {replacement}");
-                return;
-            }
-        }
-    }
+    //     Some(crumb)
+    // }
 
-    let mut sentry_options = sentry_client_options();
-    sentry_options.before_breadcrumb = Some(Arc::new(Box::new(before_breadcrumb)));
-    sentry_options.before_send = Some(Arc::new(move |mut event| {
-        let mut crash_recovery_metadata = CrashRecoveryMetadata::new();
+    // /// We scrub text we send to Sentry so that we don't leak user input into
+    // /// crash reports.
+    // fn scrub_message(message: &mut String) {
+    //     for (regex, replacement) in ERROR_MESSAGES_TO_SCRUB.iter() {
+    //         if regex.is_match(message) {
+    //             *message = format!("(REDACTED) {replacement}");
+    //             return;
+    //         }
+    //     }
+    // }
 
-        for exception in event.exception.iter_mut() {
-            exception.value.as_mut().map(scrub_message);
+    // let mut sentry_options = sentry_client_options();
+    // sentry_options.before_breadcrumb = Some(Arc::new(Box::new(before_breadcrumb)));
+    // sentry_options.before_send = Some(Arc::new(move |mut event| {
+    //     let mut crash_recovery_metadata = CrashRecoveryMetadata::new();
 
-            // If the crash recovery process is running, mark any exception as "handled".
-            // The crash recovery process will attempt to the handle that crash, if
-            // we crash when handling we'll report that as an unhandled event to sentry.
-            if crash_recovery_metadata.is_crash_recovery_process_running {
-                if let Some(mechanism) = exception.mechanism.as_mut() {
-                    if let Some(false) = mechanism.handled {
-                        crash_recovery_metadata.was_unhandled_event();
-                    }
+    //     for exception in event.exception.iter_mut() {
+    //         exception.value.as_mut().map(scrub_message);
 
-                    mechanism.handled = Some(true);
-                }
-            }
-        }
+    //         // If the crash recovery process is running, mark any exception as "handled".
+    //         // The crash recovery process will attempt to the handle that crash, if
+    //         // we crash when handling we'll report that as an unhandled event to sentry.
+    //         if crash_recovery_metadata.is_crash_recovery_process_running {
+    //             if let Some(mechanism) = exception.mechanism.as_mut() {
+    //                 if let Some(false) = mechanism.handled {
+    //                     crash_recovery_metadata.was_unhandled_event();
+    //                 }
 
-        for (k, v) in APPLICATION_LIFECYCLE_STAGE.read().to_sentry_tags() {
-            event.tags.insert(k.to_string(), v);
-        }
-        for (k, v) in TAGS.read().iter() {
-            event.tags.insert(k.clone(), v.clone());
-        }
+    //                 mechanism.handled = Some(true);
+    //             }
+    //         }
+    //     }
 
-        Some(event)
-    }));
+    //     for (k, v) in APPLICATION_LIFECYCLE_STAGE.read().to_sentry_tags() {
+    //         event.tags.insert(k.to_string(), v);
+    //     }
+    //     for (k, v) in TAGS.read().iter() {
+    //         event.tags.insert(k.clone(), v.clone());
+    //     }
 
-    *RUST_SENTRY_CLIENT_GUARD.lock() = RustSentryClientGuard::Initialized {
-        _guard: sentry::init(sentry_options),
-    };
+    //     Some(event)
+    // }));
 
-    // Initialize the appropriate native Sentry SDK.
-    #[cfg(enable_crash_recovery)]
-    {
-        use crate::crash_recovery::{is_crash_recovery_process_running, CrashRecovery};
+    // *RUST_SENTRY_CLIENT_GUARD.lock() = RustSentryClientGuard::Initialized {
+    //     _guard: sentry::init(sentry_options),
+    // };
 
-        // If the crash recovery process is running, defer initialization of Sentry native until the
-        // crash recovery process is torn down. Unlike Sentry Rust, we can't easily mark events as
-        // handled before they are sent to Sentry. Instead, we defer initialization to avoid
-        // erroneously reporting crashes when they would be successfully handled by the crash
-        // recovery process.
-        if is_crash_recovery_process_running() {
-            ctx.subscribe_to_model(&CrashRecovery::handle(ctx), |_handle, event, ctx| {
-                if matches!(
-                    event,
-                    crate::crash_recovery::Event::CrashRecoveryProcessTornDown
-                ) {
-                    log::info!("Initializing Sentry native");
-                    sentry_minidump::init();
+    // // Initialize the appropriate native Sentry SDK.
+    // #[cfg(enable_crash_recovery)]
+    // {
+    //     use crate::crash_recovery::{is_crash_recovery_process_running, CrashRecovery};
 
-                    let auth_state_provider = crate::AuthStateProvider::handle(ctx).as_ref(ctx);
-                    let auth_state = auth_state_provider.get();
-                    let user_id = auth_state.user_id();
-                    let email = auth_state.user_email();
-                    set_optional_user_information(user_id, email, ctx);
-                }
-            });
-        } else {
-            sentry_minidump::init()
-        }
-    }
+    //     // If the crash recovery process is running, defer initialization of Sentry native until the
+    //     // crash recovery process is torn down. Unlike Sentry Rust, we can't easily mark events as
+    //     // handled before they are sent to Sentry. Instead, we defer initialization to avoid
+    //     // erroneously reporting crashes when they would be successfully handled by the crash
+    //     // recovery process.
+    //     if is_crash_recovery_process_running() {
+    //         ctx.subscribe_to_model(&CrashRecovery::handle(ctx), |_handle, event, ctx| {
+    //             if matches!(
+    //                 event,
+    //                 crate::crash_recovery::Event::CrashRecoveryProcessTornDown
+    //             ) {
+    //                 log::info!("Initializing Sentry native");
+    //                 sentry_minidump::init();
 
-    #[cfg(target_os = "macos")]
-    if FeatureFlag::CocoaSentry.is_enabled() {
-        init_cocoa_sentry();
-    }
+    //                 let auth_state_provider = crate::AuthStateProvider::handle(ctx).as_ref(ctx);
+    //                 let auth_state = auth_state_provider.get();
+    //                 let user_id = auth_state.user_id();
+    //                 let email = auth_state.user_email();
+    //                 set_optional_user_information(user_id, email, ctx);
+    //             }
+    //         });
+    //     } else {
+    //         sentry_minidump::init()
+    //     }
+    // }
 
-    set_optional_user_information(user_id, email, ctx);
+    // 已注释：以下代码已被禁用
+    // #[cfg(target_os = "macos")]
+    // if FeatureFlag::CocoaSentry.is_enabled() {
+    //     init_cocoa_sentry();
+    // }
+
+    // set_optional_user_information(user_id, email, ctx);
 }
 
 /// Baseline Sentry client options.

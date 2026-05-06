@@ -137,7 +137,8 @@ pub fn run_server(socket_path: &Path) -> anyhow::Result<()> {
         .target(log_target)
         .init();
 
-    let _guard = sentry::init(super::sentry_client_options());
+    // 已注释：禁用 Sentry 初始化
+    // let _guard = sentry::init(super::sentry_client_options());
 
     struct Handler {
         shutdown: Arc<AtomicBool>,
