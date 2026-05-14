@@ -108,6 +108,8 @@ jobs:
         run: |
           $channel = '${{ inputs.channel || 'oss' }}'
           $targetDir = "target\x86_64-pc-windows-msvc\rlto\resources"
+          $env:CARGO_FULL_PROFILE = 'rlto'
+          $env:WARP_APP_NAME = 'WarpOss'
 
           & .\script\windows\prepare_bundled_resources.ps1 `
             -DestinationDir $targetDir `
