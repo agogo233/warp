@@ -76,7 +76,7 @@ jobs:
         shell: pwsh
         run: |
           & .\script\windows\install_build_deps.ps1
-          & .\script\install_cargo_release_deps
+          cargo install cargo-about --version 0.8.4
 
       - name: Make GitHub token available
         shell: bash
