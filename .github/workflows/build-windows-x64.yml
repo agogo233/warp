@@ -89,11 +89,11 @@ jobs:
           Write-Output "Building Warp for channel: $channel"
 
           $env:CARGO_BIN_NAME = $channel
-          $env:CARGO_FULL_PROFILE = 'rlto'
+          $env:CARGO_FULL_PROFILE = 'release'
           $env:WARP_APP_NAME = 'WarpOss'
 
           cargo build -p warp `
-            --profile rlto `
+            --profile release `
             --target x86_64-pc-windows-msvc `
             --features "release_bundle,gui,nld_classifier_v1" `
             --bin "warp-oss"
@@ -107,14 +107,14 @@ jobs:
         shell: pwsh
         run: |
           $channel = '${{ inputs.channel || 'oss' }}'
-          $targetDir = "target\x86_64-pc-windows-msvc\rlto\resources"
-          $env:CARGO_FULL_PROFILE = 'rlto'
+          $targetDir = "target\x86_64-pc-windows-msvc\release\resources"
+          $env:CARGO_FULL_PROFILE = 'release'
           $env:WARP_APP_NAME = 'WarpOss'
 
           & .\script\windows\prepare_bundled_resources.ps1 `
             -DestinationDir $targetDir `
             -Channel $channel `
-            -CargoProfile "rlto"
+            -CargoProfile "release"
 
           if (-Not $?) {
             Write-Error "Failed to prepare bundled resources"
@@ -125,7 +125,7 @@ jobs:
         shell: pwsh
         run: |
           $channel = '${{ inputs.channel || 'oss' }}'
-          $buildDir = "target\x86_64-pc-windows-msvc\rlto"
+          $buildDir = "target\x86_64-pc-windows-msvc\release"
           $portableDir = "WarpOss-x64-portable"
 
           # 创建便携版目录结构
