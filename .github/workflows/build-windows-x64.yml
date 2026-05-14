@@ -29,7 +29,7 @@ concurrency:
 jobs:
   build-windows-x64:
     name: Build Windows x64 (${{ inputs.channel || 'oss' }})
-    runs-on: windows-latest-large
+    runs-on: windows-latest
     timeout-minutes: 120
 
     steps:
