@@ -1,8 +1,8 @@
-# OpenWarp 发布流水线 — 仅 Windows 平台
+# OpenWarp 发布流水线 - 仅 Windows 平台
 #
 # 流水线结构 (先打包后发布，避免出现空 Release):
-#   prepare_metadata → release_windows (上传成 workflow artifact)
-#                    → publish_release (build 成功后下载 artifact 并创建 Release)
+#   prepare_metadata → release_windows (上传 installer + portable 两个 artifact)
+#                    → publish_release (下载 artifact 并创建 Release)
 
 name: OpenWarp Release
 
@@ -23,29 +23,39 @@ env:
   CONFIG_FILE: ".github/workflows/release_configurations.json"
   CHANNEL: oss
 
-      - name: Build CLI
-        id: bundle_cli
-        run: |
-          script/bundle --channel "$CHANNEL" --arch ${{ matrix.arch }} --artifact cli --nosign
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
+jobs:
+  prepare_metadata:
+    name: Prepare metadata
+    runs-on: ubuntu-latest
+    outputs:
+      release_tag: ${{ steps.compute_tag.outputs.tag }}
+      release_branch: ${{ steps.compute_tag.outputs.branch }}
+      release_name: ${{ steps.get-config.outputs.release_base_name }} ${{ steps.compute_tag.outputs.tag }}
+      release_body: ${{ steps.get-config.outputs.release_body_text }}
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Package CLI tarball
-        run: |
-          cp "${{ steps.bundle_cli.outputs.binary_path }}" warp-oss
-          tar czf openwarp-macos-${{ matrix.arch }}.tar.gz \
-            warp-oss \
-            -C "$(dirname "${{ steps.bundle_cli.outputs.bundled_resources_dir }}")" resources
-        shell: bash
-
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - name: Get channel configuration
+        id: get-config
+        uses: ./.github/actions/get_channel_config/
         with:
-          name: openwarp-cli-macos-${{ matrix.arch }}
-          path: openwarp-macos-${{ matrix.arch }}.tar.gz
-          if-no-files-found: error
-          retention-days: 7
+          config_file: ${{ env.CONFIG_FILE }}
+          channel: ${{ env.CHANNEL }}
+
+      - name: Compute release tag and branch
+        id: compute_tag
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            BRANCH="$TAG"
+          else
+            TAG="v0.$(date +%Y.%m.%d.%H%M)"
+            BRANCH="${GITHUB_REF#refs/heads/}"
+          fi
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "branch=$BRANCH" >> $GITHUB_OUTPUT
+          echo "Release tag: $TAG / build ref: $BRANCH"
 
   release_windows:
     name: Build Release (Windows x64)
@@ -81,94 +91,54 @@ env:
       - name: Upload installer artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: openwarp-windows-x64
+          name: openwarp-windows-x64-installer
           path: ${{ steps.bundle_app.outputs.installer_path }}
           if-no-files-found: error
           retention-days: 7
 
-  release_linux:
-    name: Build Release (Linux x86_64)
-    runs-on: ubuntu-22.04
-    needs: prepare_metadata
-    # 用 22.04 (glibc 2.35) 而不是 ubuntu-latest (24.04, glibc 2.39),
-    # AppImage 用 host glibc 链接,22.04 产物能在更多旧发行版上跑
-    # (Debian 11 / Ubuntu 20.04 + 等)。
-    timeout-minutes: 180
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
-        with:
-          ref: ${{ needs.prepare_metadata.outputs.release_branch }}
-
-      - uses: ./.github/actions/prepare_environment
-        with:
-          target_os: linux
-          is_self_hosted: false
-          install_release_deps: true
-
-      - name: Install extra dependencies for deb and build
+      - name: Create portable package
         run: |
-          sudo apt-get update
-          sudo apt-get install -y libdbus-1-dev fakeroot
-        shell: bash
+          # 创建便携版目录结构
+          mkdir openwarp-portable
+          
+          # 复制主程序
+          Copy-Item "${{ steps.build_binary.outputs.binary_path }}" "openwarp-portable/warp-oss.exe"
+          
+          # 复制 resources 目录（包含图标、字体、shell 集成等）
+          $resources_dir = "${{ steps.bundle_app.outputs.bundled_resources_dir }}"
+          Copy-Item -Recurse "$resources_dir" "openwarp-portable/resources"
+          
+          # 创建启动脚本
+          @"
+          @echo off
+          cd /d "%~dp0"
+          start "" "warp-oss.exe" %*
+          "@ | Out-File -FilePath "openwarp-portable/start.bat" -Encoding ASCII
+          
+          # 创建说明文件
+          @"
+          OpenWarp Portable Version
+          =========================
+          
+          Usage:
+          1. Extract to any directory
+          2. Double-click start.bat or run warp-oss.exe
+          3. Command line args: warp-oss.exe [args]
+          
+          Note:
+          - Portable version does not auto-update
+          - Data stored in: %APPDATA%\dev.openwarp.OpenWarp
+          "@ | Out-File -FilePath "openwarp-portable/README.txt" -Encoding UTF8
+          
+          # 打包为 ZIP
+          Compress-Archive -Path "openwarp-portable/*" -DestinationPath "openwarp-windows-x64-portable.zip" -Force
+        shell: pwsh
 
-      - name: Ensure rust target is installed
-        run: rustup target add x86_64-unknown-linux-gnu
-        shell: bash
-
-      - name: Check Linux release compile
-        run: script/bundle --check-only --channel "$CHANNEL" --arch x86_64 --packages appimage,deb
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-
-      - name: Install linuxdeploy
-        # script/linux/install_linuxdeploy 不被 install_build_deps 调用,需手动跑;
-        # 它把 linuxdeploy AppImage 放到 ~/.local/bin,加到 PATH 里。
-        run: |
-          ./script/linux/install_linuxdeploy
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-        shell: bash
-
-      - name: Build AppImage (unsigned)
-        id: bundle_app
-        run: script/bundle --channel "$CHANNEL" --arch x86_64 --packages appimage,deb
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-          # ubuntu-22.04 默认有 libfuse2 但 24.04 没有;统一开 EXTRACT_AND_RUN
-          # 让 linuxdeploy/appimagetool 不依赖 FUSE 内核模块,跨 runner 版本都稳。
-          APPIMAGE_EXTRACT_AND_RUN: 1
-
-      - name: Upload package artifacts
+      - name: Upload portable artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: openwarp-linux-x86_64
-          path: ${{ steps.bundle_app.outputs.packages_dir }}
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Build CLI
-        id: bundle_cli
-        run: |
-          script/bundle --channel "$CHANNEL" --arch x86_64 --artifact cli --packages none
-        shell: bash
-        env:
-          GIT_RELEASE_TAG: ${{ needs.prepare_metadata.outputs.release_tag }}
-          APPIMAGE_EXTRACT_AND_RUN: 1
-
-      - name: Package CLI tarball
-        run: |
-          cp "${{ steps.bundle_cli.outputs.executable_path }}" warp-oss
-          tar czf openwarp-linux-x86_64.tar.gz \
-            warp-oss \
-            -C "$(dirname "${{ steps.bundle_cli.outputs.bundled_resources_dir }}")" resources
-        shell: bash
-
-      - name: Upload CLI artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        with:
-          name: openwarp-cli-linux-x86_64
-          path: openwarp-linux-x86_64.tar.gz
+          name: openwarp-windows-x64-portable
+          path: openwarp-windows-x64-portable.zip
           if-no-files-found: error
           retention-days: 7
 
@@ -201,10 +171,6 @@ env:
           files: dist/*
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      # 发布成功后立刻删本次 run 的 workflow artifact,释放 Actions storage 配额。
-      # 安装包已经挂到 GitHub Release(独立存储,不占 Actions storage),
-      # workflow artifact 只是 build job → publish job 的中间传递管道,留着没用。
-      # 仅在 Release 创建成功后执行(if: success()),失败保留 artifact 方便复盘。
       - name: Delete workflow artifacts to free Actions storage
         if: success()
         env:
