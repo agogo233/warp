@@ -663,6 +663,11 @@ impl From<&AIApiError> for RenderableAIError {
         match value {
             AIApiError::QuotaLimit => Self::QuotaLimit,
             AIApiError::ServerOverloaded => Self::ServerOverloaded,
+            AIApiError::Other(error) => Self::Other {
+                error_message: error.to_string(),
+                will_attempt_resume: false,
+                waiting_for_network: false,
+            },
             _ => Self::Other {
                 error_message: format!("Request failed with error: {value:?}"),
                 will_attempt_resume: false,

@@ -15,12 +15,6 @@ use warpui::{
     },
     platform::Cursor,
     text_layout::ClipConfig,
-    ui_components::{
-        components::UiComponentStyles,
-        segmented_control::{
-            LabelConfig, RenderableOptionConfig, SegmentedControl, SegmentedControlEvent,
-        },
-    },
     AppContext, Entity, SingletonEntity, TypedActionView, View, ViewContext, ViewHandle,
 };
 
@@ -40,30 +34,7 @@ const SEARCH_FONT_SIZE: f32 = 14.0;
 const META_FONT_SIZE: f32 = 11.0;
 const FILTER_BUTTON_HEIGHT: f32 = 24.0;
 const FILTER_LABEL_WIDTH: f32 = 44.0;
-const FILTER_ALL_WIDTH: f32 = 44.0;
-const FILTER_PROVIDER_WIDTH: f32 = 66.0;
-
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum ProviderFilterOption {
-    All,
-    Provider(SkillProvider),
-}
-
-impl ProviderFilterOption {
-    fn from_provider(provider: Option<SkillProvider>) -> Self {
-        match provider {
-            Some(provider) => Self::Provider(provider),
-            None => Self::All,
-        }
-    }
-
-    fn provider(self) -> Option<SkillProvider> {
-        match self {
-            Self::All => None,
-            Self::Provider(provider) => Some(provider),
-        }
-    }
-}
+const FILTER_BUTTON_HORIZONTAL_PADDING: f32 = 8.0;
 
 #[derive(Clone, Debug)]
 pub enum SkillManagerPanelAction {
@@ -80,7 +51,7 @@ pub struct SkillManagerPanel {
     selected_path: Option<PathBuf>,
     provider_filter: Option<SkillProvider>,
     query_editor: ViewHandle<EditorView>,
-    provider_filter_control: ViewHandle<SegmentedControl<ProviderFilterOption>>,
+    filter_mouse_states: RefCell<HashMap<Option<SkillProvider>, MouseStateHandle>>,
     row_mouse_states: RefCell<HashMap<PathBuf, MouseStateHandle>>,
     list_scroll_state: ClippedScrollStateHandle,
 }
@@ -103,16 +74,6 @@ impl SkillManagerPanel {
             editor
         });
 
-        let provider_filter_options = Self::provider_filter_options(ctx);
-        let provider_filter_control = ctx.add_typed_action_view(move |ctx| {
-            SegmentedControl::new(
-                provider_filter_options,
-                Self::render_provider_filter_option,
-                ProviderFilterOption::All,
-                Self::provider_filter_control_styles(ctx),
-            )
-        });
-
         ctx.subscribe_to_view(&query_editor, |me, _, event, ctx| {
             if matches!(
                 event,
@@ -120,30 +81,27 @@ impl SkillManagerPanel {
                     | EditorEvent::BufferReplaced
                     | EditorEvent::BufferReinitialized
             ) {
-                me.scroll_selected_path_into_view(ctx);
+                me.scroll_selected_path_into_view_with_ctx(ctx);
                 ctx.notify();
             }
         });
 
-        ctx.subscribe_to_view(&provider_filter_control, |_, _handle, event, ctx| {
-            let SegmentedControlEvent::OptionSelected(filter) = event;
-            ctx.dispatch_typed_action(&SkillManagerPanelAction::SelectProviderFilter(
-                filter.provider(),
-            ));
-        });
-
-        ctx.subscribe_to_model(&Appearance::handle(ctx), |me, _, _, ctx| {
-            me.provider_filter_control.update(ctx, |control, ctx| {
-                control.set_styles(Self::provider_filter_control_styles(ctx), ctx)
-            });
+        ctx.subscribe_to_model(&Appearance::handle(ctx), |_, _, _, ctx| {
             ctx.notify();
         });
 
         let skill_manager = SkillManager::handle(ctx);
         ctx.subscribe_to_model(&skill_manager, |me, _manager, event, ctx| match event {
             SkillManagerEvent::InventoryChanged => {
-                me.update_provider_filter_options(ctx);
-                me.scroll_selected_path_into_view(ctx);
+                let inventory = SkillManager::as_ref(ctx).list_skill_inventory(ctx);
+                if me.provider_filter.is_some_and(|provider| {
+                    !Self::providers_in_inventory(&inventory).contains(&provider)
+                }) {
+                    me.provider_filter = None;
+                }
+                let query = me.query(ctx);
+                let items = Self::filter_inventory(&inventory, &query, me.provider_filter);
+                me.scroll_selected_path_into_view(&items);
                 ctx.notify();
             }
         });
@@ -152,7 +110,7 @@ impl SkillManagerPanel {
             selected_path: None,
             provider_filter: None,
             query_editor,
-            provider_filter_control,
+            filter_mouse_states: RefCell::new(HashMap::new()),
             row_mouse_states: RefCell::new(HashMap::new()),
             list_scroll_state: ClippedScrollStateHandle::default(),
         }
@@ -166,33 +124,46 @@ impl SkillManagerPanel {
             .to_lowercase()
     }
 
-    fn filtered_items(&self, app: &AppContext) -> Vec<SkillInventoryItem> {
-        let query = self.query(app);
-        SkillManager::as_ref(app)
-            .list_skill_inventory(app)
+    fn providers_in_inventory(inventory: &[SkillInventoryItem]) -> Vec<SkillProvider> {
+        let mut providers = inventory
+            .iter()
+            .flat_map(|item| item.duplicates.iter().map(|duplicate| duplicate.provider))
+            .collect::<HashSet<_>>()
             .into_iter()
+            .collect::<Vec<_>>();
+        providers.sort_by_key(|provider| provider.to_string());
+        providers
+    }
+
+    fn filter_inventory(
+        inventory: &[SkillInventoryItem],
+        query: &str,
+        provider_filter: Option<SkillProvider>,
+    ) -> Vec<SkillInventoryItem> {
+        inventory
+            .iter()
             .filter_map(|item| {
                 let duplicates = item
                     .duplicates
-                    .into_iter()
+                    .iter()
                     .filter(|duplicate| {
-                        self.provider_filter
-                            .is_none_or(|provider| duplicate.provider == provider)
+                        provider_filter.is_none_or(|provider| duplicate.provider == provider)
                             && (query.is_empty()
-                                || duplicate.name.to_lowercase().contains(&query)
-                                || duplicate.description.to_lowercase().contains(&query)
+                                || duplicate.name.to_lowercase().contains(query)
+                                || duplicate.description.to_lowercase().contains(query)
                                 || duplicate
                                     .path
                                     .display()
                                     .to_string()
                                     .to_lowercase()
-                                    .contains(&query))
+                                    .contains(query))
                     })
+                    .cloned()
                     .collect::<Vec<_>>();
 
                 let default_skill = duplicates.first()?.clone();
                 Some(SkillInventoryItem {
-                    name: item.name,
+                    name: item.name.clone(),
                     default_skill,
                     duplicates,
                 })
@@ -200,8 +171,8 @@ impl SkillManagerPanel {
             .collect()
     }
 
-    fn selected_path_is_visible(&self, path: &Path, app: &AppContext) -> bool {
-        self.filtered_items(app)
+    fn selected_path_is_visible(path: &Path, items: &[SkillInventoryItem]) -> bool {
+        items
             .iter()
             .flat_map(|item| item.duplicates.iter())
             .any(|duplicate| duplicate.path.as_path() == path)
@@ -211,11 +182,11 @@ impl SkillManagerPanel {
         format!("skill-manager-row:{}", path.to_string_lossy())
     }
 
-    fn scroll_selected_path_into_view(&self, app: &AppContext) {
+    fn scroll_selected_path_into_view(&self, items: &[SkillInventoryItem]) {
         let Some(path) = self.selected_path.as_deref() else {
             return;
         };
-        if !self.selected_path_is_visible(path, app) {
+        if !Self::selected_path_is_visible(path, items) {
             return;
         }
 
@@ -223,6 +194,21 @@ impl SkillManagerPanel {
             position_id: Self::skill_row_position_id(path),
             mode: ScrollToPositionMode::FullyIntoView,
         });
+    }
+
+    fn scroll_selected_path_into_view_with_ctx(&self, ctx: &AppContext) {
+        let inventory = SkillManager::as_ref(ctx).list_skill_inventory(ctx);
+        let query = self.query(ctx);
+        let items = Self::filter_inventory(&inventory, &query, self.provider_filter);
+        self.scroll_selected_path_into_view(&items);
+    }
+
+    fn filter_mouse_state_for(&self, provider: Option<SkillProvider>) -> MouseStateHandle {
+        self.filter_mouse_states
+            .borrow_mut()
+            .entry(provider)
+            .or_default()
+            .clone()
     }
 
     fn row_mouse_state_for(&self, path: &Path) -> MouseStateHandle {
@@ -245,90 +231,100 @@ impl SkillManagerPanel {
             .finish()
     }
 
-    fn provider_filter_options(app: &AppContext) -> Vec<ProviderFilterOption> {
-        let mut providers = SkillManager::as_ref(app)
-            .list_skill_inventory(app)
-            .iter()
-            .flat_map(|item| item.duplicates.iter().map(|duplicate| duplicate.provider))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect::<Vec<_>>();
-        providers.sort_by_key(|provider| provider.to_string());
-
-        let mut options = vec![ProviderFilterOption::All];
-        options.extend(providers.into_iter().map(ProviderFilterOption::Provider));
-        options
-    }
-
-    fn provider_filter_control_styles(app: &AppContext) -> UiComponentStyles {
-        let appearance = Appearance::as_ref(app);
+    fn render_filter_button(
+        &self,
+        label: String,
+        is_active: bool,
+        provider: Option<SkillProvider>,
+        appearance: &Appearance,
+    ) -> Box<dyn Element> {
         let theme = appearance.theme();
-
-        UiComponentStyles {
-            font_family_id: Some(appearance.ui_font_family()),
-            font_size: Some(META_FONT_SIZE + 1.0),
-            height: Some(FILTER_BUTTON_HEIGHT),
-            border_radius: Some(CornerRadius::with_all(Radius::Pixels(6.0))),
-            border_width: Some(1.0),
-            border_color: Some(ElementFill::Solid(theme.surface_3().into())),
-            background: Some(ElementFill::Solid(
-                internal_colors::fg_overlay_1(theme).into(),
-            )),
-            ..Default::default()
-        }
-    }
-
-    fn render_provider_filter_option(
-        option: ProviderFilterOption,
-        is_selected: bool,
-        app: &AppContext,
-    ) -> Option<RenderableOptionConfig> {
-        let appearance = Appearance::as_ref(app);
-        let theme = appearance.theme();
-        let text_color = if is_selected {
+        let text_color = if is_active {
             theme.main_text_color(theme.background())
         } else {
             theme.sub_text_color(theme.background())
         };
-        let (label, width_override) = match option {
-            ProviderFilterOption::All => (
-                crate::t!("skill-manager-filter-all").into(),
-                FILTER_ALL_WIDTH,
-            ),
-            ProviderFilterOption::Provider(provider) => {
-                (provider.to_string().into(), FILTER_PROVIDER_WIDTH)
-            }
-        };
+        let state = self.filter_mouse_state_for(provider);
+        let action = SkillManagerPanelAction::SelectProviderFilter(provider);
 
-        Some(RenderableOptionConfig {
-            icon_path: "",
-            icon_color: text_color.into(),
-            label: Some(LabelConfig {
-                label,
-                width_override: Some(width_override),
-                color: text_color.into(),
-            }),
-            tooltip: None,
-            background: if is_selected {
-                ElementFill::Solid(internal_colors::fg_overlay_3(theme).into())
-            } else {
-                ElementFill::None
-            },
+        Hoverable::new(state, move |mouse| {
+            let mut button = Container::new(Self::render_label(
+                label.clone(),
+                appearance,
+                META_FONT_SIZE,
+                text_color,
+            ))
+            .with_padding_left(FILTER_BUTTON_HORIZONTAL_PADDING)
+            .with_padding_right(FILTER_BUTTON_HORIZONTAL_PADDING)
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)));
+            if is_active {
+                button = button.with_background(internal_colors::fg_overlay_3(theme));
+            } else if mouse.is_hovered() {
+                button = button.with_background(internal_colors::fg_overlay_2(theme));
+            }
+            ConstrainedBox::new(button.finish())
+                .with_height(FILTER_BUTTON_HEIGHT)
+                .finish()
         })
+        .with_cursor(Cursor::PointingHand)
+        .on_mouse_down(move |ctx, _, _| {
+            ctx.dispatch_typed_action(action.clone());
+        })
+        .finish()
     }
 
-    fn update_provider_filter_options(&mut self, ctx: &mut ViewContext<Self>) {
-        let options = Self::provider_filter_options(ctx);
-        let selected_filter = ProviderFilterOption::from_provider(self.provider_filter);
-        if !options.contains(&selected_filter) {
-            self.provider_filter = None;
-        }
-        let selected_filter = ProviderFilterOption::from_provider(self.provider_filter);
+    fn render_filter_rows(
+        &self,
+        providers: &[SkillProvider],
+        appearance: &Appearance,
+    ) -> Box<dyn Element> {
+        let theme = appearance.theme();
+        let active_filter = self.provider_filter;
 
-        self.provider_filter_control.update(ctx, |control, ctx| {
-            control.update_options(options, ctx);
-            control.set_selected_option(selected_filter, ctx);
-        });
+        let mut filter_buttons = Flex::row()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_spacing(4.0)
+            .with_child(self.render_filter_button(
+                crate::t!("skill-manager-filter-all").into(),
+                active_filter.is_none(),
+                None,
+                appearance,
+            ));
+
+        for provider in providers {
+            filter_buttons.add_child(self.render_filter_button(
+                provider.to_string(),
+                active_filter == Some(*provider),
+                Some(*provider),
+                appearance,
+            ));
+        }
+
+        let filter_group = Container::new(filter_buttons.finish())
+            .with_border(Border::all(1.0).with_border_fill(theme.surface_3()))
+            .with_background(ElementFill::Solid(
+                internal_colors::fg_overlay_1(theme).into(),
+            ))
+            .with_corner_radius(CornerRadius::with_all(Radius::Pixels(6.0)))
+            .finish();
+
+        Flex::row()
+            .with_main_axis_size(MainAxisSize::Min)
+            .with_cross_axis_alignment(CrossAxisAlignment::Center)
+            .with_spacing(8.0)
+            .with_child(
+                ConstrainedBox::new(Self::render_label(
+                    crate::t!("skill-manager-filter-provider"),
+                    appearance,
+                    META_FONT_SIZE,
+                    theme.sub_text_color(theme.background()),
+                ))
+                .with_width(FILTER_LABEL_WIDTH)
+                .finish(),
+            )
+            .with_child(filter_group)
+            .finish()
     }
 
     fn render_search_input(&self, appearance: &Appearance) -> Box<dyn Element> {
@@ -343,25 +339,6 @@ impl SkillManagerPanel {
             .with_padding(Padding::uniform(6.0).with_left(12.0).with_right(12.0))
             .with_border(Border::all(1.0).with_border_fill(theme.surface_3()))
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.0)))
-            .finish()
-    }
-
-    fn render_filter_rows(&self, appearance: &Appearance) -> Box<dyn Element> {
-        let theme = appearance.theme();
-        Flex::row()
-            .with_cross_axis_alignment(CrossAxisAlignment::Center)
-            .with_spacing(8.0)
-            .with_child(
-                ConstrainedBox::new(Self::render_label(
-                    crate::t!("skill-manager-filter-provider"),
-                    appearance,
-                    META_FONT_SIZE,
-                    theme.sub_text_color(theme.background()),
-                ))
-                .with_width(FILTER_LABEL_WIDTH)
-                .finish(),
-            )
-            .with_child(ChildView::new(&self.provider_filter_control).finish())
             .finish()
     }
 
@@ -512,17 +489,15 @@ impl TypedActionView for SkillManagerPanel {
     fn handle_action(&mut self, action: &Self::Action, ctx: &mut ViewContext<Self>) {
         match action {
             SkillManagerPanelAction::SelectProviderFilter(provider) => {
+                if self.provider_filter == *provider {
+                    return;
+                }
                 self.provider_filter = *provider;
-                self.provider_filter_control.update(ctx, |control, ctx| {
-                    control
-                        .set_selected_option(ProviderFilterOption::from_provider(*provider), ctx);
-                });
-                self.scroll_selected_path_into_view(ctx);
                 ctx.notify();
             }
             SkillManagerPanelAction::EditSkill(path) => {
                 self.selected_path = Some(path.clone());
-                self.scroll_selected_path_into_view(ctx);
+                self.scroll_selected_path_into_view_with_ctx(ctx);
                 ctx.emit(SkillManagerPanelEvent::OpenSkillFile { path: path.clone() });
                 ctx.notify();
             }
@@ -537,13 +512,16 @@ impl View for SkillManagerPanel {
 
     fn on_focus(&mut self, _focus_ctx: &warpui::FocusContext, ctx: &mut ViewContext<Self>) {
         ctx.focus(&self.query_editor);
-        self.scroll_selected_path_into_view(ctx);
+        self.scroll_selected_path_into_view_with_ctx(ctx);
         ctx.notify();
     }
 
     fn render(&self, app: &AppContext) -> Box<dyn Element> {
         let appearance = Appearance::as_ref(app);
-        let items = self.filtered_items(app);
+        let inventory = SkillManager::as_ref(app).list_skill_inventory(app);
+        let providers = Self::providers_in_inventory(&inventory);
+        let query = self.query(app);
+        let items = Self::filter_inventory(&inventory, &query, self.provider_filter);
 
         Container::new(
             Flex::column()
@@ -551,7 +529,7 @@ impl View for SkillManagerPanel {
                 .with_cross_axis_alignment(CrossAxisAlignment::Stretch)
                 .with_spacing(8.0)
                 .with_child(self.render_search_input(appearance))
-                .with_child(self.render_filter_rows(appearance))
+                .with_child(self.render_filter_rows(&providers, appearance))
                 .with_child(
                     Shrinkable::new(1.0, self.render_skill_list(&items, appearance)).finish(),
                 )
