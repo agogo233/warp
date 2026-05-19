@@ -100,13 +100,21 @@ jobs:
         run: |
           # 创建便携版目录结构
           mkdir openwarp-portable
+          mkdir openwarp-portable\x64
           
           # 复制主程序
           Copy-Item "${{ steps.build_binary.outputs.binary_path }}" "openwarp-portable/warp-oss.exe"
           
-          # 复制 resources 目录（包含图标、字体、shell 集成等）
-          # 注意：使用 build_binary 步骤生成的 target_profile_dir 来定位 resources
+          # 复制必要的 DLL 文件（ConPTY、DXC）
           $target_dir = "${{ steps.build_binary.outputs.target_profile_dir }}"
+          Copy-Item "$target_dir\conpty.dll" "openwarp-portable/conpty.dll"
+          Copy-Item "$target_dir\dxcompiler.dll" "openwarp-portable/dxcompiler.dll"
+          Copy-Item "$target_dir\dxil.dll" "openwarp-portable/dxil.dll"
+          
+          # 复制 OpenConsole.exe 到架构子目录
+          Copy-Item "$target_dir\x64\OpenConsole.exe" "openwarp-portable\x64\OpenConsole.exe"
+          
+          # 复制 resources 目录（包含图标、字体、shell 集成等）
           $resources_dir = "$target_dir\resources"
           if (Test-Path "$resources_dir") {
             Copy-Item -Recurse "$resources_dir" "openwarp-portable/resources"
