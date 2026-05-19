@@ -105,8 +105,15 @@ jobs:
           Copy-Item "${{ steps.build_binary.outputs.binary_path }}" "openwarp-portable/warp-oss.exe"
           
           # 复制 resources 目录（包含图标、字体、shell 集成等）
-          $resources_dir = "${{ steps.bundle_app.outputs.bundled_resources_dir }}"
-          Copy-Item -Recurse "$resources_dir" "openwarp-portable/resources"
+          # 注意：使用 build_binary 步骤生成的 target_profile_dir 来定位 resources
+          $target_dir = "${{ steps.build_binary.outputs.target_profile_dir }}"
+          $resources_dir = "$target_dir\resources"
+          if (Test-Path "$resources_dir") {
+            Copy-Item -Recurse "$resources_dir" "openwarp-portable/resources"
+          } else {
+            Write-Error "Resources directory not found at $resources_dir"
+            exit 1
+          }
           
           # 创建启动脚本
           @"
