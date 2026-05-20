@@ -6,11 +6,9 @@
 
 name: OpenWarp Release
 
-# 只在 push tag / 手动 dispatch 时触发
+# 每次 push / 手动 dispatch 时触发
 on:
   push:
-    tags:
-      - "v*"
   workflow_dispatch:
 
 # 创建 release + 上传 asset 需要写权限
